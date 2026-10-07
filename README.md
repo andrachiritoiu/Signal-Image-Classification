@@ -1,18 +1,27 @@
 # Radio Signal Image Classification
 
+The project compares classical machine learning baselines, hand-crafted feature pipelines, gradient boosting and **CNNs trained entirely from scratch**. The best solution is a weighted **ensemble of two 2D-CNNs (asymmetric pooling) and one 1D-Profile-CNN**, reaching **0.7571 validation accuracy**.
+
+> **Constraints respected:** no external data, no pretrained models, no transfer learning.
+
+> **Note:** all accuracies in this document are computed locally on a stratified validation split. Scores obtained on Kaggle were generally higher, by up to ~0.03.
+
 ## Table of Contents
 
-1. [Problem & Dataset](#-problem--dataset)
-2. [Results at a Glance](#-results-at-a-glance)
-3. [General Methodology](#-general-methodology)
-4. [Models in Detail](#-models-in-detail)
+1. [Problem & Dataset](#problem--dataset)
+2. [Results at a Glance](#results-at-a-glance)
+3. [General Methodology](#general-methodology)
+4. [Models in Detail](#models-in-detail)
    - [Classical baselines (Models 1–3)](#classical-baselines-models-13)
    - [Hand-crafted features (Models 4–6)](#hand-crafted-features-models-46)
    - [XGBoost (Models 7–8)](#xgboost-models-78)
    - [CNNs from scratch (Models 9–10)](#cnns-from-scratch-models-910)
    - [Advanced CNNs & final ensemble](#advanced-cnns--final-ensemble)
-5. [Final Ensemble](#-final-ensemble)
-6. [Key Takeaways](#-key-takeaways)
+5. [Final Ensemble](#final-ensemble)
+6. [Key Takeaways](#key-takeaways)
+7. [Requirements](#requirements)
+8. [Reproducibility](#reproducibility)
+9. [Author](#author)
 
 ---
 
@@ -73,7 +82,7 @@ The task is to classify images of radio signals (`.png`) into **one of 5 classes
 | 11 | DeepSignalCNN GREEN + Sliding Window 1×7 | 0.7139 |
 | 12 | 2D-CNN with asymmetric pooling | 0.7558 |
 | 12 | 2D-CNN + 1D-Profile-CNN ensemble | 0.7561 |
-| 13 | **Final ensemble** (2D old + 2D extra seed + 1D profile) | **0.7571** ✅ |
+| 13 | **Final ensemble** (2D old + 2D extra seed + 1D profile) | **0.7571** |
 
 ---
 
@@ -96,7 +105,7 @@ Model families tested:
 - **Linear models on features:** Linear SVM, Softmax (Logistic Regression)
 - **Gradient boosting:** XGBoost (with and without PCA)
 - **CNNs trained from scratch**
-- **Ensembles of CNNs** with temperature scaling and TTA
+- **Ensembles of CNNs** with temperature scaling and test-time augmentation (TTA)
 
 ---
 
@@ -131,7 +140,7 @@ Pipeline: `Image → grayscale → 64×64 → HOG → StandardScaler → LinearS
 | `cells_per_block` | (2, 2) |
 | `block_norm` | L2-Hys |
 
-- **Best:** C = 0.0002 → **0.3026** (tied with C = 0.0003, but slightly stronger regularization)
+- **Best:** C = 0.0002 → **0.3026** (tied with C = 0.0003, but with slightly stronger regularization)
 
 #### Model 5 — HOG + Global Features + Hough + Linear SVM
 Added features suited to visual radio signals (**2,449 features per image**):
@@ -140,17 +149,17 @@ Added features suited to visual radio signals (**2,449 features per image**):
 - Number and area of connected components
 - Hough-based line-detection features
 
-- Tuned `C` (1e-6 … 1.2e-5) and `class_weight` ∈ {None, balanced}
-- **Best:** C = 7·10⁻⁶, no class weight → **0.3252**
+Tuned `C` (1e-6 … 1.2e-5) and `class_weight` ∈ {None, balanced}.
+**Best:** C = 7·10⁻⁶, no class weight → **0.3252**
 
 #### Model 6 — HOG + Global + Hough + Softmax
-- `LogisticRegression` (multi-class linear model with a different loss than SVM)
+- `LogisticRegression` (multi-class linear model that optimizes a different loss than SVM)
 - **Best:** C = 0.0001 → **0.3342**
 
 ### XGBoost (Models 7–8)
 
 #### Model 7 — XGBoost + extended feature extraction
-Feature set: **HOG, LBP, intensity histogram, row/column projections, FFT, connected components, Hough features**. No `StandardScaler` (tree models are not scale-sensitive).
+Feature set: **HOG, LBP, intensity histogram, row/column projections, FFT, connected components, Hough features**. No `StandardScaler` is applied (tree models are not scale-sensitive).
 
 | n_estimators | max_depth | learning_rate | subsample | colsample | reg_lambda | Accuracy |
 |---|---|---|---|---|---|---|
@@ -169,7 +178,7 @@ Pipeline: `Image → feature extraction → StandardScaler → PCA → XGBoost`
 | 200 | 200 | 0.7363 | **0.3577** |
 | 0.95 | 798 | 0.9500 | 0.3355 |
 
-PCA **hurt** performance — it discarded information useful for separating classes.
+PCA **hurt** performance: it discarded information that was useful for separating the classes.
 
 ### CNNs from scratch (Models 9–10)
 
@@ -194,13 +203,13 @@ PCA **hurt** performance — it discarded information useful for separating clas
 |---|---|---|
 | RGB | 60 | 0.6881 |
 | EDGE | 52 | 0.6713 |
-| RGB + EDGE ensemble | – | 0.6881 (best weight: 1.0 RGB / 0.0 EDGE) |
+| RGB + EDGE ensemble | – | 0.6881 (best weights: 1.00 RGB / 0.00 EDGE) |
 
 #### Model 10 — DeepSignalCNN (SE + ASPP; RGB + EDGE + FREQ)
 - Conv blocks, BatchNorm, SiLU, residual connections, **Squeeze-and-Excitation** and **ASPP**
 - **11,751,333** trainable parameters per model
 - Three input representations: **RGB**, **EDGE**, **FREQ**
-- FREQ channels (2D Fourier transform of the grayscale image): log-magnitude low frequencies, log-magnitude high frequencies, cosine of the phase
+- FREQ channels (2D Fourier transform of the grayscale image): log-magnitude for low frequencies, log-magnitude for high frequencies, cosine of the phase
 
 | Setting | Value |
 |---|---|
@@ -217,9 +226,9 @@ PCA **hurt** performance — it discarded information useful for separating clas
 | RGB | 77 | 0.6987 |
 | EDGE | 57 | 0.6800 |
 | FREQ | 26 | 0.2829 |
-| **Ensemble** | – | **0.6997** |
+| **RGB + EDGE + FREQ ensemble** | – | **0.6997** |
 
-Temperature scaling: RGB 1.0504, EDGE 0.8763, FREQ 1.4859. Best ensemble weights:
+Temperature scaling values: RGB 1.0504, EDGE 0.8763, FREQ 1.4859. Best ensemble weights:
 
 ```
 p = 0.85 · p_RGB + 0.05 · p_EDGE + 0.10 · p_FREQ
@@ -227,8 +236,10 @@ p = 0.85 · p_RGB + 0.05 · p_EDGE + 0.10 · p_FREQ
 
 ### Advanced CNNs & final ensemble
 
+All models in this section were trained from scratch, without external data, pretrained models or transfer learning. The goal was to adapt the architecture to the structure of radio-signal images, which contain lines, bright bands and different distributions along the vertical and horizontal axes.
+
 #### GREEN channel + Sliding Window 1×7
-Three input channels: original **green channel**, **local mean over a 1×7 window**, and the **difference** between the green channel and its local mean. Trained 90 epochs (lr 2·10⁻⁴, batch 48, patience 20) → **0.7139**.
+Three input channels: the original **green channel**, the **local mean over a 1×7 window**, and the **difference** between the green channel and its local mean. Trained for 90 epochs (initial lr 2·10⁻⁴, batch size 48, patience 20). Best result: **0.7139**.
 
 | Epoch | Val. acc. |
 |---|---|
@@ -240,20 +251,22 @@ Three input channels: original **green channel**, **local mean over a 1×7 windo
 | 90 | 0.7139 |
 
 #### 2D-CNN with Asymmetric Pooling + 1D-Profile-CNN
-- **2D-CNN with asymmetric pooling** (12,044,069 params) preserves the directional structure of the signal (lines, bright bands, different vertical vs. horizontal distributions) better than symmetric pooling → **0.7558**
-- **1D-Profile-CNN** (5,707,077 params) operates on sum/mean profiles over rows and columns. Weak alone (~0.33), but adds complementary information in an ensemble.
+- **2D-CNN with asymmetric pooling** (12,044,069 params) preserves the directional structure of the signal better than symmetric pooling → **0.7558**
+- **1D-Profile-CNN** (5,707,077 params) works on profiles extracted from the image (sum / mean of pixels over rows and columns). It is weak on its own, but contributes complementary information in an ensemble.
 
 | Model | Params | Val. acc. |
 |---|---|---|
 | 2D-CNN asymmetric pool | 12,044,069 | 0.7558 |
 | 1D-Profile-CNN | 5,707,077 | 0.3255 |
-| 90% 2D + 10% 1D ensemble | – | 0.7561 |
+| 2D-CNN + 1D-Profile-CNN ensemble (90% / 10%) | – | 0.7561 |
+
+The confusion matrix showed that the model recognizes class 0 very well but still confuses the neighbouring classes 3 and 4.
 
 ---
 
 ## Final Ensemble
 
-A second 2D-CNN was trained with a different seed (`SEED_EXTRA=2026`). Probabilities were calibrated with **temperature scaling** and combined by weighted averaging.
+The final submission keeps the main 2D-CNN and adds a second 2D-CNN trained with a different seed (`SEED_EXTRA=2026`). The 1D-Profile-CNN is kept as the third component for complementary information. Probabilities are calibrated with **temperature scaling** before being combined by weighted averaging.
 
 | Model | Individual val. acc. | Temperature | Final weight |
 |---|---|---|---|
@@ -261,13 +274,17 @@ A second 2D-CNN was trained with a different seed (`SEED_EXTRA=2026`). Probabili
 | 2D-CNN extra (seed 2026) | 0.7435 | 1.2004 | 0.10 |
 | 1D-Profile-CNN | 0.2323 | 1.8802 | 0.25 |
 
+> The individual accuracy of the 1D-Profile-CNN differs between runs (0.3255 in the intermediate ensemble above, 0.2323 for the model used in the final ensemble).
+
 ```
 p_final = 0.65 · p_2D-old + 0.10 · p_2D-extra + 0.25 · p_1D-profile
 ```
 
-**Final validation accuracy: 0.7571.** Test predictions use **8× Test-Time Augmentation (TTA)** per component; the output file is `submission_LAST_BEST.csv`.
+**Final validation accuracy: 0.7571** — the best local score obtained in the project.
 
-### Confusion matrix (rows = true, columns = predicted)
+For the test set, **8 TTA predictions** were used for each component. The final file is `submission_LAST_BEST.csv`.
+
+### Confusion matrix (rows = true class, columns = predicted class)
 
 | True \ Pred | 0 | 1 | 2 | 3 | 4 |
 |---|---|---|---|---|---|
@@ -290,19 +307,50 @@ p_final = 0.65 · p_2D-old + 0.10 · p_2D-extra + 0.25 · p_1D-profile
 | Macro avg | 0.7652 | 0.7509 | 0.7516 | 3100 |
 | Weighted avg | 0.7645 | 0.7571 | 0.7542 | 3100 |
 
-**Main confusions:** class 3 → 2 (107 cases), class 4 → 3 (113 cases), class 2 → 1 (76 cases). These are explained by the visual similarity between consecutive classes.
+**Main confusions:** class 3 predicted as 2 (107 cases), class 4 predicted as 3 (113 cases) and class 2 predicted as 1 (76 cases). These errors are explained by the visual similarity between consecutive classes.
 
 ---
 
 ## Key Takeaways
 
 - **Raw pixels are insufficient** — KNN, SVM and Extra Trees stay at 0.20–0.27.
-- **Hand-crafted features help** — HOG, LBP, FFT, Hough, etc. lift accuracy to ~0.42 with XGBoost.
+- **Hand-crafted features help** — HOG, LBP, FFT, Hough, etc. lift accuracy to ~0.42 with XGBoost, the best classical method.
 - **PCA did not help** XGBoost; it removed discriminative information.
-- **CNNs from scratch gave the biggest jump** (0.42 → ~0.70).
-- **Domain-adapted architecture mattered most** — asymmetric pooling brought the largest gain (0.7139 → 0.7558).
-- **Ensembling with diverse models** (different seed, 1D profile model, temperature scaling, TTA) added a final small boost to 0.7571.
+- **CNNs trained from scratch gave the biggest jump** (from ~0.42 to ~0.70).
+- **Domain-adapted architecture mattered most** — asymmetric pooling brought the largest single gain (0.7139 → 0.7558).
+- **Ensembling diverse models** (different seed, 1D profile model, temperature scaling, TTA) added a final small boost to 0.7571.
 - The FREQ (Fourier) representation was weak on its own (0.2829) and contributed little.
 
+---
+
+## Requirements
+
+Main libraries used (versions not pinned in the report):
+
+```
+numpy
+pandas
+pillow
+scikit-learn
+scikit-image
+opencv-python
+xgboost
+torch
+torchvision
+matplotlib
+```
+
+A CUDA-capable GPU is strongly recommended for the CNN models (the deep models were trained on an NVIDIA A100 80GB).
 
 ---
+
+## Reproducibility
+
+- Stratified 80% / 20% train/validation split
+- `StandardScaler` and PCA fit **only** on the local train subset
+- Hyperparameters selected on validation accuracy
+- Second 2D-CNN trained with `SEED_EXTRA = 2026`
+- Class-weighted loss, label smoothing, early stopping with patience, cosine annealing learning-rate schedule
+- Test predictions use 8× TTA per ensemble component
+
+
